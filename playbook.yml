@@ -1,0 +1,16 @@
+---
+- name: Check uptime and docker containers
+  hosts: ubuntu
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Run uptime and docker ps
+      ansible.builtin.shell: |
+        uptime
+        docker ps
+      register: cmd_output
+
+    - name: Display command output
+      ansible.builtin.debug:
+        msg: "{{ cmd_output.stdout }}"
