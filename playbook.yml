@@ -14,3 +14,4 @@
     - name: Display command output
       ansible.builtin.debug:
         msg: "{{ cmd_output.stdout }}"
+# Тест
