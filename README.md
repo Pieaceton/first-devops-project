@@ -24,7 +24,7 @@
 ## Требования
 
 - Docker и Docker Compose
-- Ubuntu 20.04+ на VM (192.168.0.218)
+- Ubuntu 20.04+ на VM (192.168.0.*)
 - Ansible (для проверки синтаксиса в CI)
 - SSH-доступ к VM
 
