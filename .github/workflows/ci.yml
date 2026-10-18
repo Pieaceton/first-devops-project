@@ -1,0 +1,17 @@
+name: DevOps CI Pipeline
+
+# Запускать этот сценарий автоматически при каждой отправке кода (git push)
+on: [push]
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Скачиваем код из репозитория
+        uses: actions/checkout@v4
+
+      - name: 2. Проверяем синтаксис Python-скрипта на ошибки
+        run: python3 -m py_compile main.py
+
+      - name: 3. Проверяем сборку Docker-образа
+        run: docker build -t my-app:test .
