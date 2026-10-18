@@ -1,17 +1,27 @@
-name: DevOps CI Pipeline
+name: DevOps CI/CD Pipeline
 
-# Запускать этот сценарий автоматически при каждой отправке кода (git push)
-on: [push]
+on:
+  push:
+    branches: [ "main" ]
 
 jobs:
   build-and-check:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Скачиваем код из репозитория
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 2. Проверяем синтаксис Python-скрипта на ошибки
-        run: python3 -m py_compile main.py
+      - name: Check YAML syntax
+        run: |
+          sudo apt-get update && sudo apt-get install -y yamllint
+          yamllint -d "{extends: relaxed, rules: {line-length: disable}}" .
 
-      - name: 3. Проверяем сборку Docker-образа
-        run: docker build -t my-app:test .
+  deploy-to-vm:
+    needs: build-and-check
+    runs-on: self-hosted
+    steps:
+      - name: Pull latest changes and restart Docker Compose
+        run: |
+          cd ~/ansible-test
+          git pull origin main
+          docker compose up -d --build
