@@ -6,6 +6,11 @@
 
   vars:
     project_dir: /home/user/ansible-test
+    config_files:
+      - "{{ project_dir }}/docker-compose.yml"
+      - "{{ project_dir }}/prometheus.yml"
+      - "{{ project_dir }}/loki-config.yml"
+      - "{{ project_dir }}/promtail-config.yml"
 
   tasks:
     - name: Fix any pending dpkg issues
