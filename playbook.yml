@@ -1,17 +1,66 @@
 ---
-- name: Check uptime and docker containers
+- name: Configure and deploy infrastructure on local VM
   hosts: ubuntu
   become: yes
-  gather_facts: no
+  gather_facts: yes
+
+  vars:
+    project_dir: /home/user/ansible-test
+    compose_files:
+      - "{{ project_dir }}/docker-compose.yml"
+      - "{{ project_dir }}/prometheus.yml"
 
   tasks:
-    - name: Run uptime and docker ps
-      ansible.builtin.shell: |
-        uptime
-        docker ps
-      register: cmd_output
+    - name: Update apt cache and install required packages
+      ansible.builtin.apt:
+        update_cache: yes
+        name:
+          - docker.io
+          - docker-compose-v2
+          - git
+          - curl
+          - python3-pip
+        state: present
 
-    - name: Display command output
+    - name: Install Docker Python SDK
+      ansible.builtin.pip:
+        name: docker
+        state: present
+
+    - name: Ensure Docker service is enabled and started
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Wait for Docker daemon to be ready
+      ansible.builtin.command: docker info
+      register: docker_info
+      until: docker_info.rc == 0
+      retries: 15
+      delay: 5
+
+    - name: Copy project configuration files
+      ansible.builtin.copy:
+        dest: "{{ item }}"
+        content: "{{ lookup('file', item) }}"
+        mode: "0644"
+      loop:
+        - "{{ project_dir }}/docker-compose.yml"
+        - "{{ project_dir }}/prometheus.yml"
+
+    - name: Ensure project directory exists
+      ansible.builtin.file:
+        path: "{{ project_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Deploy or restart the Docker Compose stack
+      community.docker.docker_compose:
+        project_src: "{{ project_dir }}"
+        state: present
+        recreate: always
+
+    - name: Display deployed containers
       ansible.builtin.debug:
-        msg: "{{ cmd_output.stdout }}"
-# Тест
+        msg: "Infrastructure stack deployed successfully"
