@@ -64,6 +64,32 @@
         state: present
         recreate: always
 
+    - name: Wait for the application to become available through Nginx
+      ansible.builtin.uri:
+        url: http://localhost:8080/health
+        method: GET
+        status_code: 200
+        return_content: true
+      register: app_health
+      until: app_health.status == 200
+      retries: 10
+      delay: 5
+
+    - name: Verify the application metrics endpoint
+      ansible.builtin.uri:
+        url: http://localhost:8080/metrics
+        method: GET
+        status_code: 200
+        return_content: true
+      register: app_metrics
+      until: app_metrics.status == 200
+      retries: 10
+      delay: 5
+
     - name: Display deployed containers
       ansible.builtin.debug:
         msg: "Infrastructure stack deployed successfully"
+
+    - name: Display application health check result
+      ansible.builtin.debug:
+        var: app_health.json
