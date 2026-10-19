@@ -12,9 +12,15 @@ scrape_configs:
   - job_name: docker
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
     relabel_configs:
       - source_labels: [__meta_docker_container_name]
+        regex: /(.+)
         target_label: container
+      - source_labels: [__meta_docker_container_log_path]
+        target_label: __path__
+      - source_labels: [__meta_docker_container_id]
+        target_label: __host__
 
   - job_name: containers
     static_configs:
@@ -26,7 +32,7 @@ scrape_configs:
 
     pipeline_stages:
       - regex:
-          expression: '^\{"log":"(?P<log>.*?)","stream":"(?P<stream>.*?)","time":"(?P<time>.*?)\}$'
+          expression: '^\{"log":"(?P<log>.*?)","stream":"(?P<stream>.*?)","time":"(?P<time>.*?)"\}$'
       - timestamp:
           source: time
           format: RFC3339Nano

@@ -1,129 +1,72 @@
 {
-  "annotations": {
-    "list": []
-  },
-  "description": "Monitoring dashboard for Docker host CPU and Memory",
-  "gnetId": null,
   "id": null,
-  "links": [],
+  "uid": "infra-monitoring",
+  "title": "Infrastructure Monitoring",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "refresh": "5s",
   "panels": [
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
       "id": 1,
-      "options": {
-        "colorMode": "value",
-        "legendMode": "table",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "mean"
-          ],
-          "fields": "",
-          "limit": 100,
-          "values": false
-        }
-      },
+      "title": "CPU Usage (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "100 - (avg by (instance) (irate(node_cpu{mode=\"idle\"}[5m])) * 100)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
           "refId": "A"
         }
-      ],
-      "title": "CPU Usage (%)",
-      "type": "stat"
+      ]
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
       "id": 2,
-      "options": {
-        "colorMode": "value",
-        "legendMode": "table",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "mean"
-          ],
-          "fields": "",
-          "limit": 100,
-          "values": false
-        }
-      },
+      "title": "Memory Usage (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
           "refId": "A"
         }
-      ],
-      "title": "Memory Usage (%)",
-      "type": "stat"
+      ]
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
       "id": 3,
-      "options": {
-        "colorMode": "value",
-        "legendMode": "table",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "mean"
-          ],
-          "fields": "",
-          "limit": 100,
-          "values": false
+      "title": "Disk Available (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "100 - ((node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"} * 100) / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\"})",
+          "refId": "A"
         }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Container Logs (Live)",
+      "type": "logs",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
       },
       "targets": [
         {
-          "expr": "node_filesystem_avail_bytes / node_filesystem_size_bytes * 100",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{job=~\".+\"}",
           "refId": "A"
         }
-      ],
-      "title": "Disk Available (%)",
-      "type": "stat"
+      ]
     }
-  ],
-  "refresh": "10s",
-  "schemaVersion": 39,
-  "tags": [
-    "infra"
-  ],
-  "templating": {
-    "list": []
-  },
-  "time": {
-    "from": "now-1h",
-    "to": "now"
-  },
-  "timezone": "browser",
-  "title": "Infrastructure Monitoring",
-  "uid": "infra-monitoring",
-  "version": 1
+  ]
 }
