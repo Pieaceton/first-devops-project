@@ -1,3 +1,4 @@
+---
 services:
   python-app:
     build: .
@@ -11,7 +12,7 @@ services:
     container_name: nginx-proxy
     restart: always
     ports:
-      - "8080:80"
+      - 8080:80
     volumes:
       - ./main.py:/usr/share/nginx/html/index.html:ro
     depends_on:
@@ -24,7 +25,7 @@ services:
     container_name: prometheus
     restart: always
     ports:
-      - "9090:9090"
+      - 9090:9090
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
@@ -35,7 +36,7 @@ services:
     container_name: grafana
     restart: always
     ports:
-      - "3000:3000"
+      - 3000:3000
     networks:
       - devops-net
 
@@ -44,7 +45,7 @@ services:
     container_name: node-exporter
     restart: always
     ports:
-      - "9100:9100"
+      - 9100:9100
     networks:
       - devops-net
 
@@ -53,9 +54,9 @@ services:
     container_name: cadvisor
     restart: always
     ports:
-      - "8081:8080"
+      - 8081:8080
     command:
-      - '--docker_only=true'
+      - --docker_only=true
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:rw

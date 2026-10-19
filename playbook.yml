@@ -1,37 +1,44 @@
 ---
 - name: Configure and deploy infrastructure on local VM
   hosts: ubuntu
-  become: yes
-  gather_facts: yes
+  become: true
+  gather_facts: true
 
   vars:
     project_dir: /home/user/ansible-test
-    compose_files:
-      - "{{ project_dir }}/docker-compose.yml"
-      - "{{ project_dir }}/prometheus.yml"
 
   tasks:
-    - name: Update apt cache and install required packages
+    - name: Fix any pending dpkg issues
+      ansible.builtin.command: dpkg --configure -a
+      changed_when: false
+      failed_when: false
+
+    - name: Update apt cache
       ansible.builtin.apt:
-        update_cache: yes
+        update_cache: true
+        cache_valid_time: 300
+
+    - name: Install required packages
+      ansible.builtin.apt:
         name:
-          - docker.io
-          - docker-compose-v2
           - git
           - curl
           - python3-pip
+          - python3-venv
         state: present
+        update_cache: true
 
     - name: Install Docker Python SDK
       ansible.builtin.pip:
         name: docker
         state: present
+        extra_args: "--break-system-packages"
 
     - name: Ensure Docker service is enabled and started
       ansible.builtin.systemd:
         name: docker
         state: started
-        enabled: yes
+        enabled: true
 
     - name: Wait for Docker daemon to be ready
       ansible.builtin.command: docker info
@@ -40,15 +47,6 @@
       retries: 15
       delay: 5
 
-    - name: Copy project configuration files
-      ansible.builtin.copy:
-        dest: "{{ item }}"
-        content: "{{ lookup('file', item) }}"
-        mode: "0644"
-      loop:
-        - "{{ project_dir }}/docker-compose.yml"
-        - "{{ project_dir }}/prometheus.yml"
-
     - name: Ensure project directory exists
       ansible.builtin.file:
         path: "{{ project_dir }}"
@@ -56,7 +54,7 @@
         mode: "0755"
 
     - name: Deploy or restart the Docker Compose stack
-      community.docker.docker_compose:
+      community.docker.docker_compose_v2:
         project_src: "{{ project_dir }}"
         state: present
         recreate: always
