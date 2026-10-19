@@ -4,6 +4,8 @@ name: DevOps CI/CD Pipeline
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
   build-and-check:
@@ -11,6 +13,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install linting tools
         run: |
@@ -22,6 +26,22 @@ jobs:
 
       - name: Check Python syntax
         run: python3 -m flake8 .
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -v
+
+      - name: Build application package
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: dist/app-release.tar.gz
+          if-no-files-found: error
+          retention-days: 30
 
   deploy-to-vm:
     needs: build-and-check

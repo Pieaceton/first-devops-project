@@ -192,6 +192,98 @@ Nginx проксирует все три пути на `python-app:8000`, вкл
 
 ---
 
+## Unit-тестирование и сборка релизных артефактов
+
+ВМ 192.168.0.218 выступает не только средой развёртывания, но и **сборочным
+сервером**: код проверяется автотестами и упаковывается в готовый к
+распространению релиз.
+
+### Автотесты — `test_main.py`
+
+Тесты написаны на стандартном `unittest` (без внешних зависимостей) и
+покрывают три слоя приложения:
+
+| Класс | Что проверяет |
+|--------|---------------|
+| `MetricsRenderingTests` | Формирование метрик: наличие `HELP`/`TYPE`, числовой тип значений, перевод строки в конце, рост счётчика, потокобезопасность под нагрузкой (20 потоков × 50 инкрементов) |
+| `HttpEndpointTests` | Реальные HTTP-запросы к поднятому сокету: коды 200, `Content-Type`, JSON-ответ `{"status": "ok"}`, игнорирование query-строки, текстовый формат Prometheus, HTML-fallback для неизвестных путей, рост счётчика от HTTP-запроса |
+
+```bash
+# Полный прогон
+python3 -m unittest discover -v
+
+# Только один класс
+python3 -m unittest test_main.MetricsRenderingTests -v
+
+# Один тест
+python3 -m unittest test_main.HttpEndpointTests.test_health_returns_json_ok -v
+```
+
+### Сборка релизного пакета — `build.sh`
+
+Скрипт собирает `dist/app-release.tar.gz` со следующим содержимым:
+
+```
+app-release/
+├── main.py            # исходный код приложения
+├── BUILD_INFO.txt     # метаданные сборки
+└── __pycache__/       # скомпилированный байткод Python
+```
+
+`BUILD_INFO.txt` фиксирует версию и полную воспроизводимость сборки:
+
+```ini
+name: app-release
+version: 1.0.0
+commit: 4b75d6b9a1c...
+commit_short: 4b75d6b
+branch: main
+commit_date: 2026-10-19T14:38:00+00:00
+build_date: 2026-10-19T19:40:12Z
+python: Python 3.12.3
+```
+
+```bash
+# Сборка с автоматическим определением версии и коммита
+./build.sh
+
+# Сборка с заданной версией
+VERSION=1.2.3 ./build.sh
+
+# Просмотр содержимого архива
+tar -tzf dist/app-release.tar.gz
+```
+
+### Конвейер сборки в GitHub Actions
+
+Job `build-and-check` выполняет этапы строго последовательно — каждый шаг
+является quality gate для следующего:
+
+```mermaid
+graph LR
+    L["yamllint ."] --> F["flake8 ."] --> T["unittest discover -v"] --> B["build.sh"] --> U["upload-artifact@v4"]
+    style L fill:#3d1f1f,stroke:#f85149,color:#ffffff
+    style F fill:#3d1f1f,stroke:#f85149,color:#ffffff
+    style T fill:#3d2f1f,stroke:#f0a732,color:#ffffff
+    style B fill:#1f3d2f,stroke:#3fb950,color:#ffffff
+    style U fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
+```
+
+| Этап | Команда | Что проверяет |
+|------|---------|---------------|
+| Check YAML syntax | `yamllint .` | Валидность и стиль всех YAML-файлов |
+| Check Python syntax | `python3 -m flake8 .` | Стиль и отсутствие ошибок в Python-коде |
+| Run unit tests | `python3 -m unittest discover -v` | Логика приложения; при падении сборка не начинается |
+| Build application package | `./build.sh` | Сборка `dist/app-release.tar.gz` с метаданными и байткодом |
+| Upload build artifact | `actions/upload-artifact@v4` | Прикрепление архива к сборке |
+
+Готовый архив прикрепляется к прогону в GitHub Actions и скачивается
+кнопкой **Download artifact** в интерфейсе CI. Job `deploy-to-vm` запускается
+только после успешного прохождения `build-and-check`, поэтому сломанный код
+никогда не попадает на целевую VM.
+
+---
+
 ## Запуск
 
 ### Развёртывание одной командой
@@ -236,11 +328,20 @@ curl -s -G --data-urlencode 'query={job=~".+"}' \
 curl -s http://localhost:3100/ready
 ```
 
-### Линтинг
+### Линтинг и тесты
 
 ```bash
 yamllint .
 python3 -m flake8 .
+python3 -m unittest discover -v
+```
+
+### Сборка релизного артефакта
+
+```bash
+./build.sh
+ls -lh dist/app-release.tar.gz
+tar -tzf dist/app-release.tar.gz
 ```
 
 ### Доступ к сервисам
@@ -261,14 +362,17 @@ python3 -m flake8 .
 
 ```
 ansible-test/
-├── .github/workflows/ci.yml            # CI/CD: линтинг + деплой
+├── .github/workflows/ci.yml            # CI/CD: линтинг, тесты, сборка, деплой
 ├── .flake8                             # Настройки flake8
+├── .gitignore                          # Исключения: dist/, __pycache__
 ├── .yamllint                           # Настройки yamllint
+├── build.sh                            # Сборка релизного пакета dist/app-release.tar.gz
 ├── Dockerfile                          # Образ Python-приложения
 ├── docker-compose.yml                  # Оркестрация всех сервисов
 ├── inventory.ini                       # Ansible inventory
 ├── ansible.cfg                         # Конфигурация Ansible
 ├── main.py                             # Python-приложение (/health, /metrics)
+├── test_main.py                        # Unit-тесты приложения (unittest)
 ├── nginx.conf                          # Reverse proxy
 ├── playbook.yml                        # IaC: развёртывание + smoke-тест
 ├── prometheus.yml                      # Targets для Prometheus
@@ -287,4 +391,4 @@ ansible-test/
 
 **Python** · **Ansible** · **Docker / Docker Compose** · **Nginx** · **Prometheus** ·
 **Grafana** · **Loki** · **Promtail** · **node-exporter** · **cAdvisor** ·
-**GitHub Actions** · **yamllint** · **flake8**
+**GitHub Actions** · **yamllint** · **flake8** · **unittest**
