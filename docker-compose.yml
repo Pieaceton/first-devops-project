@@ -37,6 +37,14 @@ services:
     restart: always
     ports:
       - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_AUTO_LOGIN_ENABLED=true
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+      - loki
     networks:
       - devops-net
 

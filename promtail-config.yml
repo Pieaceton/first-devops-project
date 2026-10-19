@@ -12,29 +12,21 @@ scrape_configs:
   - job_name: docker
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
-    pipeline_stages:
-      - docker:
-      - labels:
-          loki_source: docker
+    relabel_configs:
+      - source_labels: [__meta_docker_container_name]
+        target_label: container
 
   - job_name: containers
     static_configs:
       - targets:
           - localhost
-    labels:
-      job: dockerlogs
-      __path__: /var/lib/docker/containers/*/*-json.log
+        labels:
+          job: dockerlogs
+          __path__: /var/lib/docker/containers/*/*-json.log
 
     pipeline_stages:
-      - json:
-          keys:
-            - log
-            - stream
-            - time
       - regex:
           expression: '^\{"log":"(?P<log>.*?)","stream":"(?P<stream>.*?)","time":"(?P<time>.*?)\}$'
-      - labels:
-          stream:
       - timestamp:
           source: time
           format: RFC3339Nano
