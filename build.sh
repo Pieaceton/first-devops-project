@@ -29,6 +29,10 @@ if git rev-parse --git-dir > /dev/null 2>&1; then
     COMMIT_SHORT="$(git rev-parse --short HEAD)"
     COMMIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
     COMMIT_DATE="$(git log -1 --format=%cI)"
+    # При сборке по тегу checkout выполнен в detached HEAD: показываем имя тега
+    if [ "$COMMIT_BRANCH" = "HEAD" ]; then
+        COMMIT_BRANCH="$(git describe --tags --exact-match 2> /dev/null || echo "detached")"
+    fi
 else
     COMMIT_SHA="unknown"
     COMMIT_SHORT="unknown"
