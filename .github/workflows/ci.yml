@@ -3,7 +3,7 @@ name: DevOps CI/CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: ["main"]
 
 jobs:
   build-and-check:
@@ -15,7 +15,7 @@ jobs:
       - name: Check YAML syntax
         run: |
           sudo apt-get update && sudo apt-get install -y yamllint
-          yamllint -d {extends: relaxed, rules: {line-length: disable}} .
+          yamllint .
 
   deploy-to-vm:
     needs: build-and-check

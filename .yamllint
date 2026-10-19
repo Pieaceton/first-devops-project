@@ -1,7 +1,5 @@
-extends: relaxed
-
+extends: default
 rules:
-  document-start: disable
   line-length: disable
-  truthy:
-    check-keys: false
+  document-start: disable
+  truthy: disable
