@@ -12,17 +12,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check YAML syntax
+      - name: Install linting tools
         run: |
-          sudo apt-get update && sudo apt-get install -y yamllint
-          yamllint .
+          sudo apt-get update
+          sudo apt-get install -y yamllint python3-flake8
+
+      - name: Check YAML syntax
+        run: yamllint .
+
+      - name: Check Python syntax
+        run: flake8 .
 
   deploy-to-vm:
     needs: build-and-check
     runs-on: self-hosted
     steps:
-      - name: Pull latest changes and restart Docker Compose
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Ansible
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ansible ansible-community.docker
+
+      - name: Pull latest changes and deploy via Ansible
         run: |
           cd ~/ansible-test
           git pull origin main
-          docker compose up -d --build --force-recreate
+          ansible-playbook -i inventory.ini playbook.yml
