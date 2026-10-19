@@ -33,7 +33,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     networks:
       - devops-net
 
@@ -44,10 +44,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_AUTO_LOGIN_ENABLED=true
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_AUTO_LOGIN_ENABLED=false
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
       - loki
@@ -73,9 +73,9 @@ services:
       - "--docker_only=true"
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:rw
+      - /var/run:/var/run:ro
       - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
+      - /var/lib/docker/:/var/lib/docker/:ro
     networks:
       - devops-net
 
@@ -86,7 +86,7 @@ services:
     ports:
       - "3100:3100"
     volumes:
-      - ./loki-config.yml:/etc/loki/loki-config.yml
+      - ./loki-config.yml:/etc/loki/loki-config.yml:ro
     command:
       - "-config.file=/etc/loki/loki-config.yml"
       - "-target=all"
@@ -100,9 +100,9 @@ services:
     ports:
       - "9080:9080"
     volumes:
-      - ./promtail-config.yml:/etc/promtail/promtail-config.yml
       - /var/lib/docker:/var/lib/docker
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./promtail-config.yml:/etc/promtail/promtail-config.yml:ro
     command: -config.file=/etc/promtail/promtail-config.yml
     depends_on:
       - loki

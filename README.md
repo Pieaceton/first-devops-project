@@ -12,10 +12,12 @@
 ```mermaid
 graph TD
     DEV[Разработчик<br/>git push origin main]
+    TAG[Разработчик<br/>git push origin v1.0.0]
 
     subgraph GHA["GitHub Actions"]
-        LINT["Линтинг<br/>yamllint .<br/>python3 -m flake8 ."]
+        LINT["Линтинг и Security<br/>yamllint .<br/>python3 -m flake8 .<br/>unittest test_security"]
         DEPLOY["Job: deploy-to-vm<br/>self-hosted runner"]
+        RELEASE["Job: release<br/>softprops/action-gh-release"]
     end
 
     subgraph ANS["Ansible / IaC"]
@@ -38,8 +40,11 @@ graph TD
     end
 
     DEV -->|push| GHA
+    TAG -->|tag v*| LINT
     GHA --> LINT
     LINT -->|exit code 0| DEPLOY
+    LINT -->|exit code 0| RELEASE
+    RELEASE -->|артефакты| REL["GitHub Release<br/>app-release.tar.gz<br/>BUILD_INFO.txt"]
     DEPLOY -->|git pull + ansible-playbook| PLAY
     PLAY -->|recreate: always| DC
 
@@ -66,6 +71,8 @@ graph TD
     style VM fill:#16202b,stroke:#3fb950,color:#ffffff
     style LINT fill:#3d1f1f,stroke:#f85149,color:#ffffff
     style DEPLOY fill:#3d1f1f,stroke:#f85149,color:#ffffff
+    style RELEASE fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
+    style REL fill:#1f3d2f,stroke:#3fb950,color:#ffffff
     style PLAY fill:#3d2f1f,stroke:#f0a732,color:#ffffff
     style APP fill:#1f3d2f,stroke:#3fb950,color:#ffffff
     style NGINX fill:#1f3d2f,stroke:#3fb950,color:#ffffff
@@ -77,6 +84,7 @@ graph TD
     style CAD fill:#24303d,stroke:#8b949e,color:#ffffff
     style DC fill:#24303d,stroke:#8b949e,color:#ffffff
     style DEV fill:#1f3d2f,stroke:#3fb950,color:#ffffff
+    style TAG fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
 ```
 
 ---
@@ -85,17 +93,19 @@ graph TD
 
 ### 1. CI/CD — GitHub Actions
 
-Файл `.github/workflows/ci.yml` описывает два job-а:
+Файл `.github/workflows/ci.yml` описывает три job-а:
 
 | Job | Runner | Задача |
 |-----|--------|--------|
-| `build-and-check` | `ubuntu-latest` | Линтинг: `yamllint .` и `python3 -m flake8 .` |
+| `build-and-check` | `ubuntu-latest` | Линтинг, security-тесты, unit-тесты, сборка и загрузка артефакта |
 | `deploy-to-vm` | `self-hosted` | `git pull origin main` + `ansible-playbook -i inventory.ini playbook.yml` |
+| `release` | `ubuntu-latest` | Публикация GitHub Release по тегу версии `v*` |
 
-Ключевая идея: **линтинг — это quality gate**. Job `deploy-to-vm` объявлен с
-`needs: build-and-check`, поэтому при ошибке в YAML- или Python-файлах деплой
-даже не начнётся. Runner `self-hosted` работает прямо на целевой VM, поэтому
-доступ к Docker и Ansible не требует дополнительной настройки.
+Ключевая идея: **линтинг и security-тесты — это quality gate**. Job
+`deploy-to-vm` объявлен с `needs: build-and-check`, поэтому при ошибке в
+YAML-, Python-файлах или при обнаружении секретов деплой даже не начнётся.
+Runner `self-hosted` работает прямо на целевой VM, поэтому доступ к Docker и
+Ansible не требует дополнительной настройки.
 
 ### 2. IaC — Ansible
 
@@ -154,6 +164,10 @@ graph TD
   и `grafana/provisioning/dashboards/dashboards.yml`) описывает datasource-ы и
   провайдер дашбордов. Дашборд лежит в виде обычного JSON-файла в репозитории
   и версионируется вместе с кодом.
+- **Аутентификация Grafana**: автологин отключён
+  (`GF_AUTH_AUTO_LOGIN_ENABLED=false`), а пароль администратора задаётся
+  переменной окружения `GF_SECURITY_ADMIN_PASSWORD` (значение по умолчанию
+  `admin` используется только на локальном стенде).
 - **Docker Compose** (`docker-compose.yml`) — единое описание всей инфраструктуры:
   образы, порты, тома, healthcheck-и, зависимости и общая bridge-сеть
   `devops-net`.
@@ -261,9 +275,10 @@ Job `build-and-check` выполняет этапы строго последо�
 
 ```mermaid
 graph LR
-    L["yamllint ."] --> F["flake8 ."] --> T["unittest discover -v"] --> B["build.sh"] --> U["upload-artifact@v4"]
+    L["yamllint ."] --> F["flake8 ."] --> S["unittest test_security"] --> T["unittest discover -v"] --> B["build.sh"] --> U["upload-artifact@v4"]
     style L fill:#3d1f1f,stroke:#f85149,color:#ffffff
     style F fill:#3d1f1f,stroke:#f85149,color:#ffffff
+    style S fill:#3d1f1f,stroke:#f85149,color:#ffffff
     style T fill:#3d2f1f,stroke:#f0a732,color:#ffffff
     style B fill:#1f3d2f,stroke:#3fb950,color:#ffffff
     style U fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
@@ -273,6 +288,7 @@ graph LR
 |------|---------|---------------|
 | Check YAML syntax | `yamllint .` | Валидность и стиль всех YAML-файлов |
 | Check Python syntax | `python3 -m flake8 .` | Стиль и отсутствие ошибок в Python-коде |
+| Run security tests | `python3 -m unittest test_security -v` | Секреты и практики безопасности; при нарушении сборка не начинается |
 | Run unit tests | `python3 -m unittest discover -v` | Логика приложения; при падении сборка не начинается |
 | Build application package | `./build.sh` | Сборка `dist/app-release.tar.gz` с метаданными и байткодом |
 | Upload build artifact | `actions/upload-artifact@v4` | Прикрепление архива к сборке |
@@ -281,6 +297,112 @@ graph LR
 кнопкой **Download artifact** в интерфейсе CI. Job `deploy-to-vm` запускается
 только после успешного прохождения `build-and-check`, поэтому сломанный код
 никогда не попадает на целевую VM.
+
+---
+
+## DevSecOps: проверки безопасности
+
+Файл `test_security.py` добавляет в конвейер автоматический контроль
+безопасности. Тесты написаны **только на стандартной библиотеке**, поэтому
+запускаются без установки `bandit`, `trivy` или любых других зависимостей —
+на локальной машине, на CI-раннере и на целевой VM.
+
+```bash
+# Только security-тесты
+python3 -m unittest test_security -v
+
+# Все тесты проекта (unit + security)
+python3 -m unittest discover -v
+```
+
+### Что проверяется
+
+| Класс | Проверка |
+|--------|----------|
+| `SecretScanningTests` | Приватные ключи (PEM-блоки, в том числе `BEGIN OPENSSH PRIVATE KEY`), токены GitHub (classic и fine-grained), ключи AWS, токены Slack и OpenAI, JWT и захардкоженные пароли в файлах репозитория |
+| `DockerComposeSecurityTests` | Запрет `privileged: true` и `network_mode: host`, отсутствие опасных Linux capabilities, секреты только через переменные окружения, отключённый автологин Grafana, монтирования каталогов хоста в режиме read-only, наличие healthcheck у сервиса приложения |
+| `DockerfileSecurityTests` | Фиксация версии базового образа, запуск от непривилегированного пользователя, запрет `ADD` с внешним URL, отсутствие секретов в `ENV`/`ARG`, наличие `HEALTHCHECK`, исключение `.git` из контекста сборки через `.dockerignore` |
+| `PipelinePolicyTests` | Security-тесты запускаются **до** сборки, релиз публикуется по тегу `v*`, у job-а релиза есть права `contents: write` |
+
+Секреты считаются таковыми, если значение **не** является ссылкой на переменную
+окружения (`${VAR}`, `${{ secrets.X }}`, `{{ var }}`). Допустимые исключения
+перечислены в `PLACEHOLDER_VALUES` — это значения-заглушки (`changeme`,
+`example`, `admin` и т. п.), которые в pet-проекте заменяются переменными
+окружения.
+
+### Что сделано в инфраструктуре
+
+| Проблема | Решение |
+|----------|---------|
+| Приложение работало от root | В `Dockerfile` добавлен непривилегированный пользователь `appuser` (uid 10001) и инструкция `USER` |
+| Пароль Grafana был зашит в `docker-compose.yml` | `GF_SECURITY_ADMIN_PASSWORD` читается из переменной окружения (`${GF_SECURITY_ADMIN_PASSWORD:-admin}`) |
+| Grafana была доступна без аутентификации | `GF_AUTH_AUTO_LOGIN_ENABLED=false` — вход выполняется под учётной записью `admin` |
+| Каталоги хоста монтировались в режиме read-write | Все конфиги и каталоги смонтированы с `:ro`; read-write оставлен только там, где это требуется по назначению (`docker.sock` и `/var/lib/docker` для Promtail) |
+| В образ попадал каталог `.git` | Добавлен `.dockerignore` |
+| Promtail падал с `config file does not exist` | Конфиг Promtail теперь монтируется в контейнер: `./promtail-config.yml:/etc/promtail/promtail-config.yml:ro` |
+
+### Ручная проверка перед коммитом
+
+```bash
+yamllint .
+python3 -m flake8 .
+python3 -m unittest test_security -v
+python3 -m unittest discover -v
+```
+
+---
+
+## Релизы
+
+Релизы публикуются автоматически по тегу версии. Workflow
+`.github/workflows/ci.yml` содержит триггер `tags: ["v*"]` и отдельный job
+`release`, который собирает пакет с версией из тега и публикует GitHub Release
+через `softprops/action-gh-release@v2` с автогенерацией Release Notes.
+
+```mermaid
+graph LR
+    T["git tag v1.0.0 && git push origin v1.0.0"] --> C["build-and-check"]
+    C --> R["release job"]
+    R --> A["dist/app-release.tar.gz"]
+    R --> B["dist/BUILD_INFO.txt"]
+    R --> GH["GitHub Release v1.0.0"]
+    style T fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
+    style C fill:#3d2f1f,stroke:#f0a732,color:#ffffff
+    style R fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
+    style GH fill:#1f3d2f,stroke:#3fb950,color:#ffffff
+```
+
+### Что попадает в релиз
+
+| Файл | Описание |
+|------|----------|
+| `dist/app-release.tar.gz` | Архив с `main.py`, `BUILD_INFO.txt` и скомпилированным байткодом |
+| `dist/BUILD_INFO.txt` | Те же метаданные сборки отдельным файлом (версия, коммит, ветка, дата, версия Python) |
+
+### Порядок выпуска
+
+```bash
+cd ~/ansible-test
+
+# 1. Прогнать все проверки локально
+yamllint . && python3 -m flake8 . && python3 -m unittest discover -v
+
+# 2. Зафиксировать изменения и отправить их в main
+git add .
+git commit -m "Add security tests and release workflow"
+git push origin main
+
+# 3. Создать и отправить тег версии
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+
+# 4. Убедиться, что релиз опубликован
+gh release view v1.0.0 --json tagName,url,assets
+```
+
+Тег `v*` запускает полный конвейер: линтинг → security-тесты → unit-тесты →
+сборка → деплой на VM → публикация GitHub Release. Если хотя бы один
+quality-gate не пройден, релиз не создаётся.
 
 ---
 
@@ -333,6 +455,7 @@ curl -s http://localhost:3100/ready
 ```bash
 yamllint .
 python3 -m flake8 .
+python3 -m unittest test_security -v
 python3 -m unittest discover -v
 ```
 
@@ -356,23 +479,27 @@ tar -tzf dist/app-release.tar.gz
 | node-exporter | http://localhost:9100 | — |
 | Promtail | http://localhost:9080 | — |
 
+Релизы и артефакты сборки публикуются в GitHub Releases: https://github.com/Pieaceton/first-devops-project/releases
+
 ---
 
 ## Структура репозитория
 
 ```
 ansible-test/
-├── .github/workflows/ci.yml            # CI/CD: линтинг, тесты, сборка, деплой
+├── .github/workflows/ci.yml            # CI/CD: линтинг, security-тесты, сборка, деплой, релиз
+├── .dockerignore                       # Исключения контекста сборки образа (.git, dist, ...)
 ├── .flake8                             # Настройки flake8
 ├── .gitignore                          # Исключения: dist/, __pycache__
 ├── .yamllint                           # Настройки yamllint
 ├── build.sh                            # Сборка релизного пакета dist/app-release.tar.gz
-├── Dockerfile                          # Образ Python-приложения
+├── Dockerfile                          # Образ Python-приложения (непривилегированный пользователь)
 ├── docker-compose.yml                  # Оркестрация всех сервисов
 ├── inventory.ini                       # Ansible inventory
 ├── ansible.cfg                         # Конфигурация Ansible
 ├── main.py                             # Python-приложение (/health, /metrics)
 ├── test_main.py                        # Unit-тесты приложения (unittest)
+├── test_security.py                    # DevSecOps-тесты: секреты и безопасность конфигурации
 ├── nginx.conf                          # Reverse proxy
 ├── playbook.yml                        # IaC: развёртывание + smoke-тест
 ├── prometheus.yml                      # Targets для Prometheus
@@ -391,4 +518,4 @@ ansible-test/
 
 **Python** · **Ansible** · **Docker / Docker Compose** · **Nginx** · **Prometheus** ·
 **Grafana** · **Loki** · **Promtail** · **node-exporter** · **cAdvisor** ·
-**GitHub Actions** · **yamllint** · **flake8** · **unittest**
+**GitHub Actions** · **yamllint** · **flake8** · **unittest** · **GitHub Releases**

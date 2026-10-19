@@ -58,11 +58,27 @@
         state: directory
         mode: "0755"
 
+    - name: Check that configuration files are present
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: config_stats
+      loop: "{{ config_files }}"
+
+    - name: Verify configuration files are present
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Отсутствует конфигурационный файл: {{ item.item }}"
+      loop: "{{ config_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
     - name: Deploy or restart the Docker Compose stack
       community.docker.docker_compose_v2:
         project_src: "{{ project_dir }}"
         state: present
         recreate: always
+        build: always
 
     - name: Wait for the application to become available through Nginx
       ansible.builtin.uri:

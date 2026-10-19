@@ -4,8 +4,12 @@ name: DevOps CI/CD Pipeline
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
     branches: ["main"]
+
+permissions:
+  contents: read
 
 jobs:
   build-and-check:
@@ -19,13 +23,16 @@ jobs:
       - name: Install linting tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y yamllint flake8 ansible
+          sudo apt-get install -y yamllint flake8
 
       - name: Check YAML syntax
         run: yamllint .
 
       - name: Check Python syntax
         run: python3 -m flake8 .
+
+      - name: Run security tests (DevSecOps gate)
+        run: python3 -m unittest test_security -v
 
       - name: Run unit tests
         run: python3 -m unittest discover -v
@@ -60,3 +67,38 @@ jobs:
           cd ~/ansible-test
           git pull origin main
           ansible-playbook -i inventory.ini playbook.yml
+
+  release:
+    name: Publish GitHub Release
+    needs: build-and-check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build release package
+        run: |
+          chmod +x build.sh
+          VERSION="${GITHUB_REF_NAME#v}" ./build.sh
+          cp dist/app-release/BUILD_INFO.txt dist/BUILD_INFO.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            dist/app-release.tar.gz
+            dist/BUILD_INFO.txt
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Verify published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "${GITHUB_REF_NAME}" --json tagName,url,assets
