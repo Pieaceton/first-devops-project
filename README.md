@@ -728,3 +728,10 @@ ansible-test/
 **Python** · **Ansible** · **Docker / Docker Compose** · **Nginx** · **Prometheus** ·
 **Grafana** · **Loki** · **Promtail** · **node-exporter** · **cAdvisor** ·
 **GitHub Actions** · **yamllint** · **flake8** · **unittest** · **GitHub Releases**
+
+## HTTPS-доступ и защита от DDoS
+
+Nginx принимает HTTPS-трафик на порту 8443 (маппинг 8443:443).
+SSL-сертификаты (cert.pem, key.pem) генерируются автоматически при старте контейнера.
+
+Защита от DDoS реализована через `limit_req_zone` (10 r/s на IP) с burst=20.
