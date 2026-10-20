@@ -22,8 +22,9 @@ services:
       - "8443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx-certs:/etc/nginx/ssl
     command: >
-      sh -c "mkdir -p /etc/nginx/ssl && if [ ! -f /etc/nginx/ssl/cert.pem ]; then apk add --no-cache openssl && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -subj '/CN=localhost'; fi && nginx -g 'daemon off;'"
+      sh -c "mkdir -p /etc/nginx/ssl && if [ ! -s /etc/nginx/ssl/cert.pem ] || [ ! -s /etc/nginx/ssl/key.pem ]; then apk add --no-cache openssl && umask 077 && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/ssl/key.pem -out /etc/nginx/ssl/cert.pem -subj '/CN=localhost' && chmod 600 /etc/nginx/ssl/key.pem; fi && nginx -g 'daemon off;'"
     depends_on:
       - python-app
     networks:
@@ -116,3 +117,6 @@ services:
 networks:
   devops-net:
     driver: bridge
+
+volumes:
+  nginx-certs:
