@@ -44,7 +44,7 @@ graph TD
     GHA --> LINT
     LINT -->|exit code 0| DEPLOY
     LINT -->|exit code 0| RELEASE
-    RELEASE -->|артефакты| REL["GitHub Release<br/>app-release.tar.gz<br/>BUILD_INFO.txt"]
+    RELEASE -->|артефакты| REL["GitHub Release<br/>app-release.tar.gz<br/>devops-app.pyz<br/>devops-app_all.deb"]
     DEPLOY -->|git pull + ansible-playbook| PLAY
     PLAY -->|recreate: always| DC
 
@@ -200,6 +200,11 @@ app_uptime_seconds 123.456
 Счётчик запросов защищён `threading.Lock`, поэтому корректно работает при
 конкурентных подключениях.
 
+Точка входа приложения — функция `main()`, а адрес и порт можно переопределить
+переменными окружения `APP_HOST` и `APP_PORT` (по умолчанию `0.0.0.0:8000`).
+Именно `main:main` используется как точка входа zipapp-артефакта
+`devops-app.pyz`.
+
 Nginx проксирует все три пути на `python-app:8000`, включая `/health`
 и `/metrics`, — это позволяет проверять приложение снаружи контейнера
 через единый публичный порт `8080`.
@@ -233,9 +238,17 @@ python3 -m unittest test_main.MetricsRenderingTests -v
 python3 -m unittest test_main.HttpEndpointTests.test_health_returns_json_ok -v
 ```
 
-### Сборка релизного пакета — `build.sh`
+### Сборка релизных пакетов — `build.sh`
 
-Скрипт собирает `dist/app-release.tar.gz` со следующим содержимым:
+Скрипт собирает сразу **три настоящих релизных формата**:
+
+| Артефакт | Формат | Назначение |
+|----------|--------|------------|
+| `dist/app-release.tar.gz` | tar-архив | Исходники, метаданные сборки и скомпилированный байткод |
+| `dist/devops-app.pyz` | zipapp | Единый исполняемый файл: `./devops-app.pyz` — и приложение работает |
+| `dist/devops-app_1.0.0_all.deb` | Debian/Ubuntu | Устанавливаемый пакет с systemd-юнитом |
+
+#### 1. Архив исходников — `dist/app-release.tar.gz`
 
 ```
 app-release/
@@ -257,15 +270,99 @@ build_date: 2026-10-19T19:40:12Z
 python: Python 3.12.3
 ```
 
+#### 2. Standalone executable — `dist/devops-app.pyz`
+
+Собирается штатным модулем `python3 -m zipapp` с shebang
+`#!/usr/bin/env python3` и точкой входа `main:main`. Файл запускается
+напрямую, без установки и без внешних зависимостей:
+
+```bash
+chmod +x dist/devops-app.pyz
+./dist/devops-app.pyz          # поднимает сервер на 0.0.0.0:8000
+curl -s http://localhost:8000/health
+```
+
+Порт и адрес можно переопределить переменными окружения `APP_PORT` и
+`APP_HOST` — этим пользуются автотесты, чтобы поднять несколько копий
+приложения одновременно.
+
+#### 3. Установочный пакет Debian/Ubuntu — `dist/devops-app_1.0.0_all.deb`
+
+Пакет собирается утилитой `dpkg-deb --build` из настоящей структуры
+Debian-пакета:
+
+```
+DEBIAN/
+├── control             # метаданные пакета (Package, Version, Architecture...)
+├── md5sums             # контрольные суммы устанавливаемых файлов
+└── postinst            # создаёт пользователя devops-app и перечитывает unit-ы
+etc/systemd/system/
+└── devops-app.service  # unit-файл systemd
+opt/devops-app/
+├── main.py             # приложение
+└── BUILD_INFO.txt      # метаданные сборки
+usr/local/bin/
+└── devops-app          # исполняемый лаунчер
+```
+
+Установка пакета:
+
+```bash
+# Установить пакет
+sudo dpkg -i dist/devops-app_1.0.0_all.deb
+
+# Проверить состояние пакета
+dpkg -l devops-app
+
+# Метаданные и состав пакета
+dpkg-deb --info dist/devops-app_1.0.0_all.deb
+dpkg-deb --contents dist/devops-app_1.0.0_all.deb
+
+# Запустить как сервис
+sudo systemctl daemon-reload
+sudo systemctl enable --now devops-app
+curl -s http://localhost:8000/health
+
+# Удалить
+sudo dpkg -r devops-app
+```
+
+Сервис запускается от непривилегированного пользователя `devops-app`,
+которого создаёт `postinst`, и работает с hardening-опциями systemd
+(`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`).
+
+#### Команды сборки
+
 ```bash
 # Сборка с автоматическим определением версии и коммита
 ./build.sh
 
-# Сборка с заданной версией
+# Сборка с заданной версией (имя .deb-пакета строится из неё)
 VERSION=1.2.3 ./build.sh
 
-# Просмотр содержимого архива
+# Просмотр содержимого артефактов
 tar -tzf dist/app-release.tar.gz
+unzip -l dist/devops-app.pyz
+dpkg-deb --contents dist/devops-app_1.0.0_all.deb
+```
+
+### Тесты сборочного конвейера — `test_build.py`
+
+Отдельный набор автотестов проверяет сам сборочный конвейер:
+
+| Класс | Что проверяет |
+|--------|---------------|
+| `BuildArtifactsTests` | `build.sh` завершается с кодом 0 и создаёт все три артефакта (`.tar.gz`, `.pyz`, `.deb`) |
+| `TarballContentTests` | В tar-архиве есть `main.py`, `BUILD_INFO.txt` с номером коммита и скомпилированный байткод |
+| `ZipappArtifactTests` | Shebang `#!/usr/bin/env python3`, права на исполнение, точка входа `main:main` и фактический запуск `.pyz` с проверкой `/health` |
+| `DebianPackageTests` | `dpkg-deb --info` возвращает корректные метаданные пакета, а `dpkg-deb --contents` — лаунчер, systemd-юнит и приложение |
+
+```bash
+# Только тесты сборки
+python3 -m unittest test_build -v
+
+# Все тесты проекта
+python3 -m unittest discover -v
 ```
 
 ### Конвейер сборки в GitHub Actions
@@ -289,11 +386,11 @@ graph LR
 | Check YAML syntax | `yamllint .` | Валидность и стиль всех YAML-файлов |
 | Check Python syntax | `python3 -m flake8 .` | Стиль и отсутствие ошибок в Python-коде |
 | Run security tests | `python3 -m unittest test_security -v` | Секреты и практики безопасности; при нарушении сборка не начинается |
-| Run unit tests | `python3 -m unittest discover -v` | Логика приложения; при падении сборка не начинается |
-| Build application package | `./build.sh` | Сборка `dist/app-release.tar.gz` с метаданными и байткодом |
-| Upload build artifact | `actions/upload-artifact@v4` | Прикрепление архива к сборке |
+| Run unit tests | `python3 -m unittest discover -v` | Логика приложения и сборочного конвейера; при падении сборка не начинается |
+| Build application package | `./build.sh` | Сборка трёх форматов: `app-release.tar.gz`, `devops-app.pyz`, `devops-app_<version>_all.deb` |
+| Upload build artifact | `actions/upload-artifact@v4` | Прикрепление всех артефактов из `dist/` к сборке |
 
-Готовый архив прикрепляется к прогону в GitHub Actions и скачивается
+Все готовые файлы прикрепляются к прогону в GitHub Actions и скачиваются
 кнопкой **Download artifact** в интерфейсе CI. Job `deploy-to-vm` запускается
 только после успешного прохождения `build-and-check`, поэтому сломанный код
 никогда не попадает на целевую VM.
@@ -347,6 +444,7 @@ python3 -m unittest discover -v
 yamllint .
 python3 -m flake8 .
 python3 -m unittest test_security -v
+python3 -m unittest test_build -v
 python3 -m unittest discover -v
 ```
 
@@ -361,11 +459,12 @@ python3 -m unittest discover -v
 
 ```mermaid
 graph LR
-    T["git tag v1.0.0 && git push origin v1.0.0"] --> C["build-and-check"]
+    T["git tag v1.1.0 && git push origin v1.1.0"] --> C["build-and-check"]
     C --> R["release job"]
     R --> A["dist/app-release.tar.gz"]
-    R --> B["dist/BUILD_INFO.txt"]
-    R --> GH["GitHub Release v1.0.0"]
+    R --> P["dist/devops-app.pyz"]
+    R --> D["dist/devops-app_1.1.0_all.deb"]
+    R --> GH["GitHub Release v1.1.0"]
     style T fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
     style C fill:#3d2f1f,stroke:#f0a732,color:#ffffff
     style R fill:#2d1f3d,stroke:#bc8cff,color:#ffffff
@@ -377,7 +476,12 @@ graph LR
 | Файл | Описание |
 |------|----------|
 | `dist/app-release.tar.gz` | Архив с `main.py`, `BUILD_INFO.txt` и скомпилированным байткодом |
+| `dist/devops-app.pyz` | Standalone executable: запускается как `./devops-app.pyz` |
+| `dist/devops-app_<version>_all.deb` | Устанавливаемый пакет Debian/Ubuntu с systemd-юнитом |
 | `dist/BUILD_INFO.txt` | Те же метаданные сборки отдельным файлом (версия, коммит, ветка, дата, версия Python) |
+
+Номер версии в имени `.deb`-пакета берётся из тега: для тега `v1.1.0`
+собирается `devops-app_1.1.0_all.deb`.
 
 ### Порядок выпуска
 
@@ -389,15 +493,15 @@ yamllint . && python3 -m flake8 . && python3 -m unittest discover -v
 
 # 2. Зафиксировать изменения и отправить их в main
 git add .
-git commit -m "Add security tests and release workflow"
+git commit -m "Build three release formats and publish them in GitHub Releases"
 git push origin main
 
 # 3. Создать и отправить тег версии
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
+git tag -a v1.1.0 -m "Release v1.1.0"
+git push origin v1.1.0
 
 # 4. Убедиться, что релиз опубликован
-gh release view v1.0.0 --json tagName,url,assets
+gh release view v1.1.0 --json tagName,url,assets
 ```
 
 Тег `v*` запускает полный конвейер: линтинг → security-тесты → unit-тесты →
@@ -456,15 +560,18 @@ curl -s http://localhost:3100/ready
 yamllint .
 python3 -m flake8 .
 python3 -m unittest test_security -v
+python3 -m unittest test_build -v
 python3 -m unittest discover -v
 ```
 
-### Сборка релизного артефакта
+### Сборка релизных артефактов
 
 ```bash
 ./build.sh
-ls -lh dist/app-release.tar.gz
+ls -lh dist/app-release.tar.gz dist/devops-app.pyz dist/devops-app_*.deb
 tar -tzf dist/app-release.tar.gz
+unzip -l dist/devops-app.pyz
+dpkg-deb --info dist/devops-app_1.0.0_all.deb
 ```
 
 ### Доступ к сервисам
@@ -492,13 +599,14 @@ ansible-test/
 ├── .flake8                             # Настройки flake8
 ├── .gitignore                          # Исключения: dist/, __pycache__
 ├── .yamllint                           # Настройки yamllint
-├── build.sh                            # Сборка релизного пакета dist/app-release.tar.gz
+├── build.sh                            # Сборка 3 релизных форматов: tar.gz, .pyz, .deb
 ├── Dockerfile                          # Образ Python-приложения (непривилегированный пользователь)
 ├── docker-compose.yml                  # Оркестрация всех сервисов
 ├── inventory.ini                       # Ansible inventory
 ├── ansible.cfg                         # Конфигурация Ansible
 ├── main.py                             # Python-приложение (/health, /metrics)
 ├── test_main.py                        # Unit-тесты приложения (unittest)
+├── test_build.py                       # Тесты сборочного конвейера (tar.gz, .pyz, .deb)
 ├── test_security.py                    # DevSecOps-тесты: секреты и безопасность конфигурации
 ├── nginx.conf                          # Reverse proxy
 ├── playbook.yml                        # IaC: развёртывание + smoke-тест

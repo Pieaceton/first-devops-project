@@ -46,7 +46,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: dist/app-release.tar.gz
+          path: |
+            dist/app-release.tar.gz
+            dist/devops-app.pyz
+            dist/devops-app_*.deb
+            dist/BUILD_INFO.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -94,6 +98,8 @@ jobs:
         with:
           files: |
             dist/app-release.tar.gz
+            dist/devops-app.pyz
+            dist/devops-app_*.deb
             dist/BUILD_INFO.txt
           generate_release_notes: true
           fail_on_unmatched_files: true

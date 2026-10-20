@@ -1,11 +1,12 @@
 import json
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
-HOST = "0.0.0.0"
-PORT = 8000
+HOST = os.environ.get("APP_HOST", "0.0.0.0")
+PORT = int(os.environ.get("APP_PORT", "8000"))
 START_TIME = time.time()
 
 _counter_lock = threading.Lock()
@@ -61,6 +62,11 @@ class SimpleHandler(BaseHTTPRequestHandler):
         print("{} - {}".format(self.address_string(), fmt % args), flush=True)
 
 
-if __name__ == "__main__":
-    print("Веб-сервер запущен внутри контейнера на порту 8000...", flush=True)
+def main():
+    """Точка входа приложения (используется в том числе zipapp-артефактом)."""
+    print("Веб-сервер запущен внутри контейнера на порту {}...".format(PORT), flush=True)
     HTTPServer((HOST, PORT), SimpleHandler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()
