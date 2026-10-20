@@ -146,6 +146,43 @@ Ansible не требует дополнительной настройки.
 100 - ((node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} * 100) / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})
 ```
 
+#### Правила алертинга — `alert_rules.yml`
+
+Prometheus оценивает правила из файла `alert_rules.yml`, подключённого через
+`rule_files` в `prometheus.yml` и смонтированного в контейнер в режиме
+read-only. Группа правил называется `infrastructure_alerts`:
+
+| Алерт | Условие | Длительность | Severity | Что означает |
+|-------|---------|--------------|----------|--------------|
+| `AppDown` | `up{job="python-app"} == 0` | `1m` | `critical` | Приложение не отвечает: target `python-app:8000` недоступен дольше минуты |
+| `HighCpuLoad` | `100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85` | `2m` | `warning` | Загрузка CPU выше 85% дольше двух минут |
+| `LowDiskSpace` | `(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 15` | `5m` | `warning` | Доступно меньше 15% дискового пространства |
+
+Проверить, что правила загружены и активны:
+
+```bash
+# Все правила в виде JSON
+curl -s http://localhost:9090/api/v1/rules | python3 -m json.tool
+
+# Только имена алертов и их состояние
+curl -s http://localhost:9090/api/v1/rules | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for group in data['data']['groups']:
+    print(group['name'])
+    for rule in group['rules']:
+        print('  ', rule['name'], rule['state'], rule.get('duration', 0))
+"
+
+# Сработавшие (firing) алерты
+curl -s http://localhost:9090/api/v1/alerts
+```
+
+Правила покрыты автотестами `test_alerts.py`: они проверяют наличие всех трёх
+алертов, корректность полей `alert`, `expr`, `for`, `labels.severity`,
+`annotations.summary`, а также подключение файла правил в `prometheus.yml` и
+проброс в контейнер в `docker-compose.yml`.
+
 ### 4. Centralized Logging — Loki + Promtail
 
 - **Promtail** (`promtail-config.yml`) читает JSON-логи всех контейнеров
@@ -445,6 +482,7 @@ yamllint .
 python3 -m flake8 .
 python3 -m unittest test_security -v
 python3 -m unittest test_build -v
+python3 -m unittest test_alerts -v
 python3 -m unittest discover -v
 ```
 
@@ -510,6 +548,66 @@ quality-gate не пройден, релиз не создаётся.
 
 ---
 
+## Публикация Docker-образа в GitHub Container Registry
+
+Job `build-and-check` после сборки артефактов публикует образ приложения в
+**GitHub Container Registry (ghcr.io)**. Для этого у job-а есть разрешение
+`packages: write`, а логин выполняется официальным экшеном
+`docker/login-action@v3` с токеном `${{ secrets.GITHUB_TOKEN }}`.
+
+Образ публикуется под двумя тегами:
+
+| Тег | Назначение |
+|-----|------------|
+| `ghcr.io/pieaceton/first-devops-project:latest` | Последний образ из `main` |
+| `ghcr.io/pieaceton/first-devops-project:<short-sha>` | Образ конкретного коммита (7 символов SHA) |
+
+```yaml
+- name: Login to GitHub Container Registry
+  uses: docker/login-action@v3
+  with:
+    registry: ghcr.io
+    username: ${{ github.actor }}
+    password: ${{ secrets.GITHUB_TOKEN }}
+
+- name: Resolve image tags
+  id: image
+  run: |
+    SHORT_SHA="$(git rev-parse --short HEAD)"
+    {
+      echo "short_sha=${SHORT_SHA}"
+      echo "tags<<EOF"
+      echo "ghcr.io/pieaceton/first-devops-project:latest"
+      echo "ghcr.io/pieaceton/first-devops-project:${SHORT_SHA}"
+      echo "EOF"
+    } >> "$GITHUB_OUTPUT"
+
+- name: Build and push image to GitHub Container Registry
+  uses: docker/build-push-action@v6
+  with:
+    context: .
+    push: true
+    tags: ${{ steps.image.outputs.tags }}
+```
+
+### Использование образа
+
+```bash
+# Публичный образ из реестра
+docker pull ghcr.io/pieaceton/first-devops-project:latest
+
+# Образ конкретного коммита
+docker pull ghcr.io/pieaceton/first-devops-project:c69a42a
+
+# Запуск
+docker run --rm -p 8000:8000 ghcr.io/pieaceton/first-devops-project:latest
+curl -s http://localhost:8000/health
+```
+
+Пакеты реестра доступны по адресу https://github.com/Pieaceton/first-devops-project/pkgs/container/first-devops-project
+
+---
+
 ## Запуск
 
 ### Развёртывание одной командой
@@ -561,6 +659,7 @@ yamllint .
 python3 -m flake8 .
 python3 -m unittest test_security -v
 python3 -m unittest test_build -v
+python3 -m unittest test_alerts -v
 python3 -m unittest discover -v
 ```
 
@@ -607,10 +706,12 @@ ansible-test/
 ├── main.py                             # Python-приложение (/health, /metrics)
 ├── test_main.py                        # Unit-тесты приложения (unittest)
 ├── test_build.py                       # Тесты сборочного конвейера (tar.gz, .pyz, .deb)
+├── test_alerts.py                      # Тесты правил алертинга Prometheus
 ├── test_security.py                    # DevSecOps-тесты: секреты и безопасность конфигурации
 ├── nginx.conf                          # Reverse proxy
 ├── playbook.yml                        # IaC: развёртывание + smoke-тест
-├── prometheus.yml                      # Targets для Prometheus
+├── prometheus.yml                      # Targets для Prometheus + подключение правил
+├── alert_rules.yml                     # Правила алертинга Prometheus (infrastructure_alerts)
 ├── loki-config.yml                     # Конфигурация Loki
 ├── promtail-config.yml                 # Сбор логов контейнеров
 └── grafana/provisioning/

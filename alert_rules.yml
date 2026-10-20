@@ -1,0 +1,29 @@
+---
+groups:
+  - name: infrastructure_alerts
+    interval: 30s
+    rules:
+      - alert: AppDown
+        expr: 'up{job="python-app"} == 0'
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Application python-app is not responding"
+          description: "Target python-app:8000 is down for more than 1 minute. The /health endpoint is unavailable."
+      - alert: HighCpuLoad
+        expr: '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85'
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU load on the host"
+          description: "CPU utilisation is above 85% on {{ $labels.instance }} for more than 2 minutes."
+      - alert: LowDiskSpace
+        expr: '(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 15'
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.mountpoint }}"
+          description: "Less than 15% of disk space is available on {{ $labels.instance }} ({{ $labels.mountpoint }})."
