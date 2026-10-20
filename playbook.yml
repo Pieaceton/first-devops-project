@@ -102,9 +102,43 @@
       retries: 10
       delay: 5
 
+    - name: Check that k3s is installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Verify k3s is installed
+      ansible.builtin.assert:
+        that:
+          - k3s_binary.stat.exists
+        fail_msg: "k3s is not installed; install it with the official get.k3s.io script"
+
+    - name: Ensure k3s service is enabled and started
+      ansible.builtin.systemd:
+        name: k3s
+        state: started
+        enabled: true
+
+    - name: Wait for the k3s node to become Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=180s
+      changed_when: false
+
+    - name: Apply Kubernetes application manifests
+      ansible.builtin.command: kubectl apply -f k8s/
+      args:
+        chdir: "{{ project_dir }}"
+      register: k8s_apply
+      changed_when: >-
+        'created' in k8s_apply.stdout or
+        'configured' in k8s_apply.stdout
+
     - name: Display deployed containers
       ansible.builtin.debug:
         msg: "Infrastructure stack deployed successfully"
+
+    - name: Display Kubernetes deployment result
+      ansible.builtin.debug:
+        var: k8s_apply.stdout_lines
 
     - name: Display application health check result
       ansible.builtin.debug:

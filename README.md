@@ -113,7 +113,8 @@ Ansible не требует дополнительной настройки.
 установка системных пакетов, `pip`-пакета Docker SDK, запуск и включение
 сервиса Docker, ожидание готовности демона, создание каталога проекта и,
 наконец, `community.docker.docker_compose_v2` с `recreate: always` — полное
-пересоздание контейнеров из актуального `docker-compose.yml`.
+пересоздание контейнеров из актуального `docker-compose.yml`. Playbook также
+проверяет и запускает k3s, ждёт состояния `Ready` и применяет манифесты из `k8s/`.
 
 Тот же playbook используется в двух режимах: вручную для локальной разработки
 и в CI для автоматического развёртывания после пуша.
@@ -625,6 +626,31 @@ docker compose up -d
 docker compose ps
 ```
 
+### Запуск приложения в Kubernetes (k3s)
+
+На ВМ k3s устанавливается официальным скриптом:
+
+```bash
+curl -sfL https://get.k3s.io | sudo sh -
+sudo systemctl status k3s
+sudo kubectl get nodes
+```
+
+Ansible-плейбук проверяет, что k3s установлен и запущен, ожидает готовности
+ноды и применяет манифесты приложения из `k8s/`. Для ручного развёртывания:
+
+```bash
+cd ~/ansible-test
+sudo kubectl apply -f k8s/
+sudo kubectl get pods
+sudo kubectl get services
+```
+
+Приложение развёртывается в трёх репликах из
+`ghcr.io/pieaceton/first-devops-project:latest`. Liveness- и readiness-probes
+проверяют `/health`; снаружи оно доступно на NodePort `30080`, например
+`http://192.168.0.218:30080/health`.
+
 ### Проверка
 
 ```bash
@@ -660,6 +686,7 @@ python3 -m flake8 .
 python3 -m unittest test_security -v
 python3 -m unittest test_build -v
 python3 -m unittest test_alerts -v
+python3 -m unittest test_k8s -v
 python3 -m unittest discover -v
 ```
 
@@ -705,11 +732,15 @@ ansible-test/
 ├── ansible.cfg                         # Конфигурация Ansible
 ├── main.py                             # Python-приложение (/health, /metrics)
 ├── test_main.py                        # Unit-тесты приложения (unittest)
+├── test_k8s.py                         # Проверка синтаксиса Kubernetes-манифестов
 ├── test_build.py                       # Тесты сборочного конвейера (tar.gz, .pyz, .deb)
 ├── test_alerts.py                      # Тесты правил алертинга Prometheus
 ├── test_security.py                    # DevSecOps-тесты: секреты и безопасность конфигурации
 ├── nginx.conf                          # Reverse proxy
 ├── playbook.yml                        # IaC: развёртывание + smoke-тест
+├── k8s/                                # Kubernetes Deployment и NodePort Service
+│   ├── app-deployment.yml
+│   └── app-service.yml
 ├── prometheus.yml                      # Targets для Prometheus + подключение правил
 ├── alert_rules.yml                     # Правила алертинга Prometheus (infrastructure_alerts)
 ├── loki-config.yml                     # Конфигурация Loki
